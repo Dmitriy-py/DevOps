@@ -184,9 +184,9 @@ if __name__ == "__main__":
 * Он должен возвращать ненулевой код выхода при сбое, чтобы systemd понял, что произошла ошибка.
 
 ### 2. Создайте юнит-файл systemd: Создайте файл с расширением .service в каталоге
-###    /etc/systemd/system/. Назовем его, например, ` my-daemon.service `
+###   **/etc/systemd/system/. Назовем его, например, ` my-daemon.service `**
 
-```
+```systemd
 systemd
 
 [Unit]
