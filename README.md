@@ -321,6 +321,235 @@ Hard Links: Несколько имен файлов могут указыват
 Независимость имени от данных: Если вы переименуете файл, меняется только запись в каталоге. Сам inode и его указатели на данные остаются прежними. Если же вы удалите файл, система просто “освободит” inode, но данные останутся на диске до тех пор, пока не будут перезаписаны другими файлами.
 Кратко: Inode — это “идентификатор” и “описатель” файла в файловой системе Linux, который знает всё о файле, кроме его имени и содержимого. Он является ключевым звеном между именем файла и его данными на диске.
 
+## 4. Сделайте реализацию blue/green стратегии деплоймента для Kubernetes на основе деплойментов, сервиса и ingress’а. Опишите как переключать версии.
+
+## Концепция Blue/Green развертывания
+
+Предположим, у нас есть приложение, которое запускается в Docker-контейнере.
+
+**Deployment для текущей версии (Blue):**
+```yaml
+# blue-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app-blue # Имя для синей версии
+  labels:
+    app: my-app
+    version: blue
+spec:
+  replicas: 3 # Количество подов
+  selector:
+    matchLabels:
+      app: my-app
+      version: blue # Метка для выбора подов этой версии
+  template:
+    metadata:
+      labels:
+        app: my-app
+        version: blue # Важно для Service
+    spec:
+      containers:
+      - name: my-app-container
+        image: your-docker-repo/my-app:v1.0.0 # Текущая рабочая версия (Blue)
+        ports:
+        - containerPort: 8080
+```
+
+**Deployment для новой версии (Green):**
+```yaml
+# green-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app-green # Имя для зеленой версии
+  labels:
+    app: my-app
+    version: green
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: my-app
+      version: green # Метка для выбора подов этой версии
+  template:
+    metadata:
+      labels:
+        app: my-app
+        version: green # Важно для Service
+    spec:
+      containers:
+      - name: my-app-container
+        image: your-docker-repo/my-app:v1.1.0 # Новая версия (Green)
+        ports:
+        - containerPort: 8080
+```
+* metadata.name: Уникальные имена для каждого Deployment.
+* spec.selector.matchLabels: Эти метки должны совпадать с метками в spec.template.metadata.labels. Они используются для того, чтобы Service мог найти нужные поды.
+* spec.template.metadata.labels: Метки, которые назначаются подам. Обязательно используйте разные метки для Blue и Green      (например, version: blue и version: green).
+* spec.template.spec.containers.image: Указывает на образ Docker. Для Blue - текущая версия, для Green - новая.
+
+### Шаг 2: Создание Service
+
+Теперь создадим Service, который будет направлять трафик. Важно, чтобы этот Service мог направлять трафик на поды любой из версий. 
+**Мы будем менять selector у Service’а, чтобы переключать трафик.**
+```yaml
+# service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-app-service
+spec:
+  selector:
+    app: my-app
+    # version: blue # <-- Эта строка будет меняться для переключения
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 8080 # Порт, на котором слушает ваше приложение в контейнере
+  type: ClusterIP # Или NodePort, если нужен прямой доступ к узлам
+```
+
+* metadata.name: Имя вашего сервиса.
+* spec.selector: Ключевой элемент для Blue/Green. В начале он будет указывать на один из Deployment’ов (например, version:    blue). Когда вы захотите переключиться на новую версию, вы измените этот селектор на version: green.
+* spec.ports: Настройка портов. targetPort должен соответствовать containerPort в Deployment’е.
+
+### Шаг 3: Создание Ingress
+
+Ingress управляет внешним доступом к вашим сервисам. 
+**Мы настроим Ingress так, чтобы он направлял весь трафик на наш my-app-service.**
+```yaml
+# ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: my-app-ingress
+  annotations:
+    # Анотации для вашего Ingress-контроллера (например, Nginx, Traefik)
+    # Пример для Nginx Ingress Controller:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx # Укажите имя вашего Ingress-класса
+  rules:
+  - host: my-app.example.com # Ваш домен
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: my-app-service # Сервис, который мы создали
+            port:
+              number: 80 # Порт сервиса
+```
+* metadata.name: Имя Ingress.
+* spec.ingressClassName: Укажите имя вашего Ingress-контроллера (например, nginx, traefik).
+* spec.rules: Правила маршрутизации.
+  ** host: Доменное имя, для которого применяется правило.
+  ** path: Путь URL.
+  ** backend.service.name: Имя Service, на который направляется трафик.
+
+### Процесс развертывания и переключения версий
+
+1. Развертывание Blue:
+   * Создайте blue-deployment.yaml.
+   * Создайте service.yaml с селектором version: blue.
+```bash
+bash
+
+kubectl apply -f blue-deployment.yaml
+kubectl apply -f service.yaml
+kubectl apply -f ingress.yaml
+```
+На этом этапе весь трафик, идущий на `my-app.example.com`, будет идти на “синюю” версию.
+
+2. Развертывание Green:
+   * Создайте green-deployment.yaml с новой версией приложения.
+   * Не создавайте новый Service и Ingress. Они уже есть.
+```bash
+bash
+
+kubectl apply -f green-deployment.yaml
+```
+На этом этапе новая версия “зеленого” приложения работает в Kubernetes, но трафик на нее еще не направлен.
+
+3. Тестирование Green версии (опционально, но очень рекомендуется): Вы можете протестировать “зеленую” версию, не затрагивая продакшн-трафик. Для этого есть несколько способов:
+   * Использование отдельного Service: Создать временный Service, который указывает на `green-deployment`, и протестировать      его.
+   * Использование Ingress с разными путями/хостами: Настроить Ingress, чтобы определенные пути (например, `my-                  app.example.com/staging)` или поддомены (например, `staging.my-app.example.com`) направлялись на Green, а основной          домен — на Blue.
+   * Тестирование внутри кластера: Если у вас есть другие приложения внутри кластера, они могут обращаться к Green Service       напрямую по его имени, минуя Ingress.
+
+4. Переключение трафика (Blue -> Green): Это самый важный момент. Вы меняете selector в вашем my-app-service.yaml так,         чтобы он указывал на Green Deployment.
+   * Сначала измените `service.yaml`:
+```yaml
+yaml
+
+# service.yaml (измененный)
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-app-service
+spec:
+  selector:
+    app: my-app
+    version: green # <-- Меняем селектор на 'green'
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 8080
+  type: ClusterIP
+```
+   * Примените изменения:
+```bash
+bash
+
+kubectl apply -f service.yaml
+```
+После этого момента весь трафик, приходящий на `my-app-service`, будет направлен на поды новой “зеленой” версии.
+
+5. Мониторинг: Внимательно отслеживайте метрики, логи и ошибки нового приложения. Если все в порядке, переключение считается успешным.
+6. Откат (если что-то пошло не так): Если вы заметили проблемы с новой версией, вы можете быстро откатиться, изменив selector в my-app-service.yaml обратно на version: blue и применив изменения:
+```bash
+bash
+
+# service.yaml (вернули к 'blue')
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-app-service
+spec:
+  selector:
+    app: my-app
+    version: blue # <-- Возвращаем селектор на 'blue'
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 8080
+  type: ClusterIP
+
+kubectl apply -f service.yaml
+```
+7. Удаление старой версии (Blue): После успешного переключения и убедившись, что новая версия работает стабильно, вы можете удалить старый Blue Deployment.
+```bash
+
+bash
+
+kubectl delete deployment my-app-blue
+```
+
+### Преимущества Blue/Green в Kubernetes:
+
+* Нулевое время простоя: Переключение происходит практически мгновенно.
+* Быстрый откат: В случае проблем можно мгновенно вернуться к предыдущей версии.
+* Легкое тестирование: Новая версия работает параллельно со старой, что позволяет провести тестирование до полного переключения.
+
+### озможные улучшения и усложнения:
+
+* Canary Releases: Вместо полного переключения, сначала направлять небольшой процент трафика на новую версию, а затем         постепенно увеличивать его.
+* Автоматизация: Весь процесс переключения (изменение селектора Service) может быть автоматизирован в CI/CD пайплайне.
+* Blue/Green для разных сред: Можно использовать эту стратегию для развертывания на разных окружениях (dev, staging, prod).
+* Service Mesh (Istio, Linkerd): Service Mesh предоставляет более продвинутые возможности для управления трафиком, включая    Blue/Green развертывания, Canary releases, A/B тестирование и тонкую настройку правил маршрутизации.
+
+Эта реализация является базовой, но очень эффективной для достижения безопасного и быстрого развертывания с минимальным риском.
 
 ## 5. Напишите политику для AWS S3 бакета, которая разрешает доступ только с определенных IP адресов.
 
