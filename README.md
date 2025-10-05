@@ -227,7 +227,7 @@ WantedBy=multi-user.target: Эта строка указывает, что се�
 
 ### 3. **Создайте пользователя и группу (если вы их указали в User и Group):**
 
-```bash
+```python
 sudo useradd -r -s /bin/false mydaemonuser
 sudo groupadd mydaemonuser
 sudo usermod -a -G mydaemonuser mydaemonuser
@@ -238,7 +238,7 @@ sudo usermod -a -G mydaemonuser mydaemonuser
 
 ### 4. **Создайте каталог для скрипта и поместите туда скрипт: В нашем примере, это /opt/my_daemon/my_daemon.py**
 
-```bash
+```python
 sudo mkdir -p /opt/my_daemon
 sudo cp my_daemon.py /opt/my_daemon/
 sudo chown mydaemonuser:mydaemonuser /opt/my_daemon/my_daemon.py
