@@ -186,7 +186,7 @@ if __name__ == "__main__":
 ### 2. Создайте юнит-файл systemd: Создайте файл с расширением .service в каталоге
 ###   **/etc/systemd/system/. Назовем его, например, ` my-daemon.service `**
 
-```systemd
+```python
 systemd
 
 [Unit]
